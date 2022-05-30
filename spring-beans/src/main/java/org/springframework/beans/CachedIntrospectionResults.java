@@ -20,6 +20,7 @@ import java.beans.BeanInfo;
 import java.beans.IntrospectionException;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
+import java.net.URL;
 import java.security.ProtectionDomain;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -282,13 +283,17 @@ public final class CachedIntrospectionResults {
 			// This call is slow so we do it once.
 			PropertyDescriptor[] pds = this.beanInfo.getPropertyDescriptors();
 			for (PropertyDescriptor pd : pds) {
-				if (Class.class == beanClass && (!"name".equals(pd.getName()) && !pd.getName().endsWith("Name"))) {
+				if (Class.class == beanClass && !("name".equals(pd.getName()) ||
+						(pd.getName().endsWith("Name") && String.class == pd.getPropertyType()))) {
 					// Only allow all name variants of Class properties
 					continue;
 				}
-				if (pd.getPropertyType() != null && (ClassLoader.class.isAssignableFrom(pd.getPropertyType())
-						|| ProtectionDomain.class.isAssignableFrom(pd.getPropertyType()))) {
-					// Ignore ClassLoader and ProtectionDomain types - nobody needs to bind to those
+				if (URL.class == beanClass && "content".equals(pd.getName())) {
+					// Only allow URL attribute introspection, not content resolution
+					continue;
+				}
+				if (pd.getWriteMethod() == null && isInvalidReadOnlyPropertyType(pd.getPropertyType())) {
+					// Ignore read-only properties such as ClassLoader - no need to bind to those
 					continue;
 				}
 				if (logger.isTraceEnabled()) {
@@ -326,9 +331,8 @@ public final class CachedIntrospectionResults {
 						// GenericTypeAwarePropertyDescriptor leniently resolves a set* write method
 						// against a declared read method, so we prefer read method descriptors here.
 						pd = buildGenericTypeAwarePropertyDescriptor(beanClass, pd);
-						if (pd.getPropertyType() != null && (ClassLoader.class.isAssignableFrom(pd.getPropertyType())
-								|| ProtectionDomain.class.isAssignableFrom(pd.getPropertyType()))) {
-							// Ignore ClassLoader and ProtectionDomain types - nobody needs to bind to those
+						if (pd.getWriteMethod() == null && isInvalidReadOnlyPropertyType(pd.getPropertyType())) {
+							// Ignore read-only properties such as ClassLoader - no need to bind to those
 							continue;
 						}
 						this.propertyDescriptors.put(pd.getName(), pd);
@@ -337,6 +341,12 @@ public final class CachedIntrospectionResults {
 				introspectInterfaces(ifc, ifc);
 			}
 		}
+	}
+
+	private boolean isInvalidReadOnlyPropertyType(@Nullable Class<?> returnType) {
+		return (returnType != null && (AutoCloseable.class.isAssignableFrom(returnType) ||
+				ClassLoader.class.isAssignableFrom(returnType) ||
+				ProtectionDomain.class.isAssignableFrom(returnType)));
 	}
 
 
